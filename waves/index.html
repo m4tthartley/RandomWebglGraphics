@@ -1,0 +1,208 @@
+<style>
+  canvas {
+    position: fixed;
+    display: block;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+  }
+</style>
+
+<canvas></canvas>
+
+<script src="math.js"></script>
+<script>
+
+  gl_init('canvas', 800, 600)
+  gl.enable(gl.BLEND)
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE)
+
+  const quad = create_array_buffer([
+    -0.5, -0.5, 0.0,
+    0.5, -0.5, 0.0,
+    0.5, 0.5, 0.0,
+    -0.5, 0.5, 0.0,
+  ])
+  const quadi = create_element_array_buffer([
+    0, 1, 2,
+    0, 2, 3,
+  ])
+  const aspect = _canvas_size.x/_canvas_size.y
+
+  let curl_offset = 0.0
+
+  const canvas = document.querySelector('canvas')
+  canvas.width = canvas.clientWidth
+  canvas.height = canvas.clientHeight
+  window.addEventListener('resize', function() {
+    canvas.width = canvas.clientWidth
+    canvas.height = canvas.clientHeight
+  })
+
+  const PARTICLE_TEXTURE_SIZE = 256
+  const PARTICLE_COUNT = PARTICLE_TEXTURE_SIZE*PARTICLE_TEXTURE_SIZE
+
+  const shader = create_shader(`
+    attribute vec3 pos;
+    varying vec2 vert;
+    void main() {
+      gl_Position =  vec4(pos*2.0, 1.0);
+      vert = pos.xy;
+    }
+  `,`
+    precision mediump float;
+    uniform float aspect;
+    uniform float t;
+    varying vec2 vert;
+
+    float circle(vec2 screen, vec2 pos, float size) {
+      return length(screen - pos) - size;
+    }
+
+    float circles(float size, float space, float line) {
+      float sdf = length(mod(vert, size*2.0+space)-size) - size;
+      if (sdf < -line/2.0) {
+        return -(line/2.0) + abs(sdf - line/2.0);
+      } else {
+        return sdf;
+      }
+    }
+
+    float square(vec2 screen, vec2 pos, vec2 size) {
+      vec2 d = abs(screen-pos)-size;
+      return min(max(d.x, d.y), 0.0);
+    }
+
+    float difference(float a, float b) {
+      return max(a, -b);
+    }
+
+    float hash(float n) {
+      return fract(sin(n)*753.5453123);
+    }
+    float noise(vec3 x) {
+        vec3 p = floor(x);
+        vec3 f = fract(x);
+        f = f*f*(3.0-2.0*f);
+
+        float n = p.x + p.y*157.0 + 113.0*p.z;
+        return mix(mix(mix(hash(n+0.0), hash(n+1.0), f.x), mix(hash(n+157.0), hash(n+158.0), f.x), f.y),
+                   mix(mix(hash(n+113.0), hash(n+114.0), f.x), mix(hash(n+270.0), hash(n+271.0), f.x), f.y), f.z);
+    }
+    float fbm(vec3 x) {
+        float a = noise(x);
+        a += noise(x * 2.0) / 2.0;
+        a += noise(x * 4.0) / 4.0;
+        a += noise(x * 8.0) / 8.0;
+        a += noise(x * 16.0) / 16.0;
+        return a;
+    }
+
+    void main() {
+      float wave = max(1.0 - abs(length(vec2(vert.x*aspect, vert.y)*15.0) - (mod(t*5.0 + fbm(vec3(vert*20.0, 0.0)), 20.0) - 2.0)), 0.0);
+      float wave2 = max(1.0 - abs(length(vec2(vert.x*aspect, vert.y)*15.0) - (mod(t*5.0 + 5.0 + fbm(vec3(vert*20.0, 0.0)), 20.0) - 2.0)), 0.0);
+      vec4 color = vec4(0);
+      vec2 screenCoords = vec2(vert.x*aspect*2.0, vert.y*2.0);
+      // float sdf = circles(0.05, 0.05, 0.04);
+      float sdf =           circle(mod(screenCoords*2.0, 0.15)-0.075, vec2(0.0), mix(0.05, 0.07, max(wave, wave2)));
+      sdf = difference(sdf, circle(mod(screenCoords*2.0, 0.15)-0.075, vec2(0.0), mix(0.03, 0.05, max(wave, wave2))));
+      sdf = min(sdf, square(mod(screenCoords*2.0+vec2(0.075, 0.0), 0.15)-vec2(0.075), vec2(0.0, 0.0), vec2(mix(0.04, 0.02, max(wave, wave2)), 0.01)));
+      sdf = min(sdf, square(mod(screenCoords*2.0+vec2(0.0, 0.075), 0.15)-vec2(0.075), vec2(0.0, 0.0), vec2(0.01, mix(0.04, 0.02, max(wave, wave2)))));
+      if (sdf < 0.0) {
+        color = vec4(0.2, 0.6, 1.0, smoothstep(0.0, -0.0075, sdf));
+      }
+      gl_FragColor = color;//vec4(1, 0.2, 0.2, 1);
+    }
+  `)
+  const gfxpp = create_shader(`
+    attribute vec3 pos;
+    varying vec2 vert;
+    void main() {
+      gl_Position =  vec4(pos*2.0, 1.0);
+      vert = pos.xy;
+    }
+  `,`
+    precision mediump float;
+    uniform float t;
+    uniform sampler2D tex;
+    uniform float aspect;
+    varying vec2 vert;
+
+    float hash(float n) {
+      return fract(sin(n)*753.5453123);
+    }
+    float noise(vec3 x) {
+        vec3 p = floor(x);
+        vec3 f = fract(x);
+        f = f*f*(3.0-2.0*f);
+
+        float n = p.x + p.y*157.0 + 113.0*p.z;
+        return mix(mix(mix(hash(n+0.0), hash(n+1.0), f.x), mix(hash(n+157.0), hash(n+158.0), f.x), f.y),
+                   mix(mix(hash(n+113.0), hash(n+114.0), f.x), mix(hash(n+270.0), hash(n+271.0), f.x), f.y), f.z);
+    }
+    float fbm(vec3 x) {
+        float a = noise(x);
+        a += noise(x * 2.0) / 2.0;
+        a += noise(x * 4.0) / 4.0;
+        a += noise(x * 8.0) / 8.0;
+        a += noise(x * 16.0) / 16.0;
+        return a;
+    }
+
+    void main() {
+      vec4 c = texture2D(tex, vert+0.5);
+      float wave = max(1.0 - abs(length(vec2(vert.x*aspect, vert.y)*15.0) - (mod(t*5.0 + fbm(vec3(vert*20.0, 0.0)), 20.0) - 2.0)), 0.0);
+      float wave2 = max(1.0 - abs(length(vec2(vert.x*aspect, vert.y)*15.0) - (mod(t*5.0 + 5.0 + fbm(vec3(vert*20.0, 0.0)), 20.0) - 2.0)), 0.0);
+      vec4 o = mix(c*0.3, c, wave);
+      o = mix(o, c, wave2);
+      gl_FragColor = o;
+      /*mix(vec4(0, 0, 0, 1), c, min(t/10.0, 1.0));*/ //mix(vec4(0, 0, 0, 1), c, c.a);
+    }
+  `)
+
+  const proj = perspective(90, canvas.width/canvas.height, 0.01, 100)
+  let cameraRot = 0.0
+
+  console.log(gl.getExtension('EXT_color_buffer_float'))
+
+  const fb = createFramebuffer(canvas.width, canvas.height)
+  // const particlefbDraw = createFramebuffer(PARTICLE_TEXTURE_SIZE, PARTICLE_TEXTURE_SIZE)
+  // bindRenderTarget(particlefb)
+
+  let time = 0.0
+
+  function draw(t) {
+    if (t) {
+      time += t
+    }
+    // console.log(gl.getError())
+    if (gl.getError() === gl.NO_ERROR) {
+      // console.log(gl.getError(), gl.NO_ERROR)
+
+      curl_offset += 0.001
+      cameraRot += 0.005
+
+      use_shader(shader)
+      bindRenderTarget(fb)
+      clear(0, 0, 0, 0)
+      uniform('aspect', canvas.width/canvas.height)
+      uniform('t', t/1000.0 * 1)
+      vertex_pointer(quad, 'pos', 3)
+      indexed_draw_call(quadi, 6)
+
+      use_shader(gfxpp)
+      bindRenderTarget(null)
+      clear(0, 0, 0, 1)
+      uniform('aspect', canvas.width/canvas.height)
+      useRenderTarget('tex', fb)
+      uniform('t', t/1000.0 * 1)
+      vertex_pointer(quad, 'pos', 3)
+      indexed_draw_call(quadi, 6)
+    }
+    
+    window.requestAnimationFrame(draw)
+  }
+  draw()
+
+</script>

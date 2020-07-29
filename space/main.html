@@ -1,0 +1,44 @@
+<script>
+  #include "../math.js"
+</script>
+<script>
+
+  gl_init()
+
+  const shader = create_shader(`#version 300 es
+    #include "shader.vert"
+  `,`#version 300 es
+    #include "shader.frag"
+  `)
+  const starShader = create_shader(`#version 300 es
+    #include "shader.vert"
+  `,`#version 300 es
+    #include "stars.frag"
+  `)
+
+  const stars = createFramebuffer(screenWidth, screenHeight)
+
+  let time = 0.0
+  function draw(t) {
+    if (t) time += t
+
+    bindRenderTarget(stars)
+    use_shader(starShader)
+    clear(0, 0, 0, 1)
+    uniform('t', t/1000.0)
+    uniform('aspect', screenWidth/screenHeight)
+    renderQuad()
+
+    bindRenderTarget(null)
+    use_shader(shader)
+    clear(0, 0, 0, 1)
+    uniform('t', t/1000.0)
+    uniform('aspect', screenWidth/screenHeight)
+    uniformRenderTarget('tex', stars)
+    renderQuad()
+    
+    window.requestAnimationFrame(draw)
+  }
+  draw()
+
+</script>

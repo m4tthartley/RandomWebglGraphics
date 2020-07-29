@@ -1,0 +1,128 @@
+<style>
+  canvas {
+    position: fixed;
+    display: block;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+  }
+</style>
+
+<canvas></canvas>
+
+<script src="math.js"></script>
+<script>
+
+  gl_init('canvas', 800, 600)
+  gl.enable(gl.BLEND)
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE)
+
+  const quad = create_array_buffer([
+    -0.5, -0.5, 0.0,
+    0.5, -0.5, 0.0,
+    0.5, 0.5, 0.0,
+    -0.5, 0.5, 0.0,
+  ])
+  const quadi = create_element_array_buffer([
+    0, 1, 2,
+    0, 2, 3,
+  ])
+  const aspect = _canvas_size.x/_canvas_size.y
+
+  let curl_offset = 0.0
+
+  const canvas = document.querySelector('canvas')
+  canvas.width = canvas.clientWidth
+  canvas.height = canvas.clientHeight
+  window.addEventListener('resize', function() {
+    canvas.width = canvas.clientWidth
+    canvas.height = canvas.clientHeight
+  })
+
+  const PARTICLE_TEXTURE_SIZE = 256
+  const PARTICLE_COUNT = PARTICLE_TEXTURE_SIZE*PARTICLE_TEXTURE_SIZE
+
+  const gfxpp = create_shader(`
+    attribute vec3 pos;
+    varying vec2 vert;
+    void main() {
+      gl_Position =  vec4(pos*2.0, 1.0);
+      vert = pos.xy;
+    }
+  `,`
+    precision mediump float;
+    uniform float t;
+    uniform sampler2D tex;
+    uniform float aspect;
+    varying vec2 vert;
+
+    float hash(float n) {
+      return fract(sin(n)*753.5453123);
+    }
+    float noise(vec3 x) {
+        vec3 p = floor(x);
+        vec3 f = fract(x);
+        f = f*f*(3.0-2.0*f);
+
+        float n = p.x + p.y*157.0 + 113.0*p.z;
+        return mix(mix(mix(hash(n+0.0), hash(n+1.0), f.x), mix(hash(n+157.0), hash(n+158.0), f.x), f.y),
+                   mix(mix(hash(n+113.0), hash(n+114.0), f.x), mix(hash(n+270.0), hash(n+271.0), f.x), f.y), f.z);
+    }
+    float fbm(vec3 x) {
+        float a = noise(x);
+        a += noise(x * 2.0) / 2.0;
+        a += noise(x * 4.0) / 4.0;
+        a += noise(x * 8.0) / 8.0;
+        a += noise(x * 16.0) / 16.0;
+        return a;
+    }
+
+    void main() {
+      vec2 uv = vert*1.0 * vec2(aspect, 1.0);
+      // float uvmul = 2.0;
+      float tt = t*0.1;
+      float r = fbm(vec3(uv, tt)) * fbm(vec3(uv*2.0, tt)) * fbm(vec3(uv*4.0, tt));
+      float g = fbm(vec3(tt, uv)) * fbm(vec3(tt, uv*2.0)) * fbm(vec3(tt, uv*4.0));
+      float b = fbm(vec3(uv.x, tt, uv.y)) * fbm(vec3(uv.x*2.0, tt, uv.y*2.0)) * fbm(vec3(uv.x*4.0, tt, uv.y*4.0));
+      gl_FragColor = vec4(vec3(r, g, b) * pow(abs(mod(length(uv)*10.0, 2.0)-1.0), 1.5), 1);
+    }
+  `)
+
+  const proj = perspective(90, canvas.width/canvas.height, 0.01, 100)
+  let cameraRot = 0.0
+
+  console.log(gl.getExtension('EXT_color_buffer_float'))
+
+  const fb = createFramebuffer(canvas.width, canvas.height)
+  // const particlefbDraw = createFramebuffer(PARTICLE_TEXTURE_SIZE, PARTICLE_TEXTURE_SIZE)
+  // bindRenderTarget(particlefb)
+
+  let time = 0.0
+
+  function draw(t) {
+    if (t) {
+      time += t
+    }
+    // console.log(gl.getError())
+    if (gl.getError() === gl.NO_ERROR) {
+      // console.log(gl.getError(), gl.NO_ERROR)
+
+      curl_offset += 0.001
+      cameraRot += 0.005
+
+      use_shader(gfxpp)
+      bindRenderTarget(null)
+      clear(0, 0, 0, 1)
+      uniform('aspect', canvas.width/canvas.height)
+      useRenderTarget('tex', fb)
+      uniform('t', t/1000.0 * 1)
+      vertex_pointer(quad, 'pos', 3)
+      indexed_draw_call(quadi, 6)
+    }
+    
+    window.requestAnimationFrame(draw)
+  }
+  draw()
+
+</script>

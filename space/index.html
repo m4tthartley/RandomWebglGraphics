@@ -1,0 +1,617 @@
+
+
+
+
+<script>
+  
+// math
+function vec2(x, y) {
+  return {x, y}
+}
+function vec3(x, y, z) {
+  return {x, y, z}
+}
+function vec4(x, y, z, w) {
+  return {x, y, z, w}
+}
+
+function add(a, b) {
+  return {
+    x: a.x+b.x,
+    y: a.y+b.y,
+    z: a.z+b.z,
+  }
+}
+function sub(a, b) {
+  return {
+    x: a.x-b.x,
+    y: a.y-b.y,
+    z: a.z-b.z,
+  }
+}
+function mul(a, b) {
+  return {
+    x: a.x*b.x,
+    y: a.y*b.y,
+    z: a.z*b.z,
+  }
+}
+function div(a, b) {
+  return {
+    x: a.x/b.x,
+    y: a.y/b.y,
+    z: a.z/b.z,
+  }
+}
+
+function length(v) {
+  return Math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z)
+}
+
+function normalize(v) {
+  const len = length(v)
+  return {
+    x: v.x / len,
+    y: v.y / len,
+    z: v.z / len,
+  }
+}
+
+function cross(a, b) {
+  const result = {
+    x: a.y*b.z - a.z*b.y,
+    y: a.z*b.x - a.x*b.z,
+    z: a.x*b.y - a.y*b.x,
+  }
+  return normalize(result);
+}
+
+function perspective(fov, aspect, near, far) {
+  if (near < 0) console.error('perspective: near should be above 0')
+  const f = 1.0 / Math.tan((fov/180.0*Math.PI) / 2.0)
+  return [
+    f / aspect, 0, 0, 0,
+    0, f, 0, 0,
+    0, 0, (far + near) / (near - far), -1,
+    0, 0, (2.0 * far * near) / (near - far), 0,
+  ]
+}
+function ortho(left, top, right, bottom, n, f) {
+  return [
+    2 / (right-left), 0, 0, 0,
+    0, 2 / (top-bottom), 0, 0,
+    0, 0, -2 / (f-n), 0,
+    -((right+left) / (right-left)), -((top+bottom) / (top-bottom)), -((f+n) / (f-n)), 1,
+  ]
+}
+function translate(x, y, z) {
+  return [
+    1, 0, 0, 0,
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    x, y, z, 1,
+  ]
+}
+function rotatex(rads) {
+  const s = Math.sin(rads)
+  const c = Math.cos(rads)
+  return [
+    1, 0,  0, 0,
+    0, c, -s, 0,
+    0, s, c,  0,
+    0, 0, 0,  1,
+  ]
+}
+function rotatey(rads) {
+  const s = Math.sin(rads)
+  const c = Math.cos(rads)
+  return [
+    c,  0, s, 0,
+    0,  1, 0, 0,
+    -s, 0, c, 0,
+    0,  0, 0, 1,
+  ]
+}
+function rotatez(rads) {
+  const s = Math.sin(rads)
+  const c = Math.cos(rads)
+  return [
+    c, -s, 0, 0,
+    s, c,  0, 0,
+    0, 0,  1, 0,
+    0, 0,  0, 1,
+  ]
+}
+
+// graphics
+let gl
+// let _canvas_size
+let screenWidth = 800
+let screenHeight = 600
+let quad
+let quadi
+function gl_init(/*c, w = 0, h = 0*/) {
+  // _canvas_size = { x: w, y: h }
+  const canvas = document.createElement('canvas')//document.querySelector(c)
+  canvas.style.position = 'fixed'
+  canvas.style.top = '0'
+  canvas.style.left = '0'
+  document.body = document.createElement('body')
+  document.body.appendChild(canvas)
+  gl = canvas.getContext('webgl2', {antialias:false, preserveDrawingBuffer:true})
+  gl.getExtension('EXT_color_buffer_float')
+
+  screenWidth = window.innerWidth
+  screenHeight = window.innerHeight
+  canvas.width = screenWidth
+  canvas.height = screenHeight
+  window.addEventListener('resize', function() {
+    screenWidth = window.innerWidth
+    screenHeight = window.innerHeight
+    canvas.width = screenWidth
+    canvas.height = screenHeight
+  })
+
+  gl.clearColor(0.0, 0.0, 0.0, 1.0)
+  // gl.clear(gl.COLOR_BUFFER_BIT/*  | gl.DEPTH_BUFFER_BIT */)
+  gl.viewport(0, 0, canvas.width, canvas.height)
+
+  quad = create_array_buffer([
+    -0.5, -0.5, 0.0,
+    0.5, -0.5, 0.0,
+    0.5, 0.5, 0.0,
+    -0.5, 0.5, 0.0,
+  ])
+  quadi = create_element_array_buffer([
+    0, 1, 2,
+    0, 2, 3,
+  ])
+}
+
+function clear(r, g, b, a, depth = false) {
+  gl.clearColor(r, g, b, a)
+  let mask = gl.COLOR_BUFFER_BIT
+  if (depth) mask |= gl.DEPTH_BUFFER_BIT
+  gl.clear(mask)
+}
+
+function depth(on) {
+  if (on) {
+    gl.enable(gl.DEPTH_TEST)
+    gl.depthFunc(gl.LEQUAL)
+  } else {
+    gl.disable(gl.DEPTH_TEST)
+  }
+}
+
+let _current_shader = 0
+function use_shader(shader) {
+  _current_shader = shader
+  gl.useProgram(shader)
+}
+
+function create_shader(vertex_shader, fragment_shader) {
+  let vs = gl.createShader(gl.VERTEX_SHADER)
+  gl.shaderSource(vs, vertex_shader)
+  gl.compileShader(vs)
+  let fs = gl.createShader(gl.FRAGMENT_SHADER)
+  gl.shaderSource(fs, fragment_shader)
+  gl.compileShader(fs)
+  if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(vs))
+  if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(fs))
+  let shader = gl.createProgram()
+  gl.attachShader(shader, vs)
+  gl.attachShader(shader, fs)
+  gl.linkProgram(shader)
+  if (!gl.getProgramParameter(shader, gl.LINK_STATUS)) console.error('Shader link error')
+  use_shader(shader)
+  return shader
+}
+
+function create_array_buffer(floats) {
+  const buf = gl.createBuffer()
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(floats), gl.STATIC_DRAW)
+  return buf
+}
+
+function create_element_array_buffer(indices) {
+  const buf = gl.createBuffer()
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf)
+  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(indices), gl.STATIC_DRAW)
+  return buf
+}
+
+function vertex_pointer(buf, attrib, components, stride = 0, offset = 0) {
+  const a = gl.getAttribLocation(_current_shader, attrib)
+  gl.enableVertexAttribArray(a)
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf)
+  gl.vertexAttribPointer(a, components, gl.FLOAT, false, stride, offset)
+}
+
+function uniform(uniform, x, y, z, w) {
+  switch (arguments.length) {
+    case 2:
+      gl.uniform1f(gl.getUniformLocation(_current_shader, uniform), x)
+      break
+    case 3:
+      gl.uniform2f(gl.getUniformLocation(_current_shader, uniform), x, y)
+      break
+    case 4:
+      gl.uniform3f(gl.getUniformLocation(_current_shader, uniform), x, y, z)
+      break
+    case 5:
+      gl.uniform4f(gl.getUniformLocation(_current_shader, uniform), x, y, z, w)
+      break
+    default:
+      console.error('Wrong number of parameters')
+      break
+  }
+}
+
+function uniform_matrix(uniform, mat) {
+  gl.uniformMatrix4fv(gl.getUniformLocation(_current_shader, uniform), false, new Float32Array(mat))
+}
+
+function draw_call(vertex_count) {
+  gl.drawArrays(gl.TRIANGLES, 0, vertex_count)
+}
+
+function indexed_draw_call(buf, index_count) {
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, buf)
+  gl.drawElements(gl.TRIANGLES, index_count, gl.UNSIGNED_SHORT, 0)
+}
+
+// Test
+// gl_init('canvas', 800, 600)
+// const shader = create_shader(`
+//  attribute vec3 pos;
+//  void main() {
+//    gl_Position = vec4(pos, 1.0);
+//  }
+// `, `
+//  void main() {
+//    gl_FragColor = vec4(1, 0, 0, 1);
+//  }
+// `
+// )
+
+// const quad = create_array_buffer([
+//  -0.5, -0.5,
+//  0.5, -0.5,
+//  0.5, 0.5,
+  
+//  -0.5, -0.5,
+//  0.5, 0.5,
+//  -0.5, 0.5,
+// ])
+// const quad2 = create_array_buffer([
+//  -0.5, -0.5,
+//  0.5, -0.5,
+//  0.5, 0.5,
+//  -0.5, 0.5,
+// ])
+// const quadi = create_element_array_buffer([
+//  0, 1, 2,
+//  0, 2, 3,
+// ])
+
+// function draw() {
+//  gl.clearColor(0, 0, 0, 1)
+//  gl.clear(gl.COLOR_BUFFER_BIT)
+//  gl.viewport(0, 0, 800, 600)
+  
+//  vertex_pointer(quad2, 'pos', 2)
+//  // draw_call(6)
+//  indexed_draw_call(quadi, 6)
+  
+//  window.requestAnimationFrame(draw)
+// }
+// draw()
+
+function createFramebuffer(width, height) {
+  const result = {
+    width,
+    height
+  }
+  result.texture = gl.createTexture()
+  gl.bindTexture(gl.TEXTURE_2D, result.texture)
+  result.buffer = gl.createFramebuffer()
+  gl.bindFramebuffer(gl.FRAMEBUFFER, result.buffer)
+
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, width, height, 0, gl.RGBA, gl.FLOAT, null)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, result.texture, 0)
+  return result
+}
+function bindRenderTarget(fb) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb ? fb.buffer : null)
+  if (fb) {
+    gl.viewport(0, 0, fb.width, fb.height)
+  } else {
+    gl.viewport(0, 0, screenWidth, screenHeight)
+  }
+}
+function uniformRenderTarget(name, fb) {
+  gl.bindTexture(gl.TEXTURE_2D, fb ? fb.texture : null)
+  if (fb) {
+    gl.uniform1i(gl.getUniformLocation(_current_shader, name), fb.texture)
+  }
+}
+
+function renderQuad() {
+  vertex_pointer(quad, 'pos', 3)
+  indexed_draw_call(quadi, 6)
+}
+</script>
+<script>
+
+  gl_init()
+
+  const shader = create_shader(`#version 300 es
+    
+uniform sampler2D tex;
+uniform float aspect;
+layout(location = 0) in vec3 pos;
+out vec2 uv;
+out vec2 uvsq;
+
+void main() {
+  vec4 p = vec4(pos*2.0, 1.0);
+  gl_Position = p;
+  uv = p.xy * vec2(aspect, 1.0);
+  uvsq  = pos.xy;
+}
+  `,`#version 300 es
+    
+precision mediump float;
+uniform sampler2D tex;
+uniform float t;
+in vec2 uv;
+in vec2 uvsq;
+out vec4 frag;
+
+
+
+
+
+float hash(float n) {
+  return fract(sin(n)*753.5453123);
+}
+
+float noise(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    f = f*f*(3.0-2.0*f);
+
+    float n = p.x + p.y*157.0 + 113.0*p.z;
+    return mix(mix(mix(hash(n+0.0), hash(n+1.0), f.x), mix(hash(n+157.0), hash(n+158.0), f.x), f.y),
+               mix(mix(hash(n+113.0), hash(n+114.0), f.x), mix(hash(n+270.0), hash(n+271.0), f.x), f.y), f.z);
+}
+
+float fbm(vec3 x) {
+    float a = noise(x);
+    a += noise(x * 2.0) / 2.0;
+    a += noise(x * 4.0) / 4.0;
+    a += noise(x * 8.0) / 8.0;
+    a += noise(x * 16.0) / 16.0;
+    return a;
+}
+
+float random (vec2 st) {
+  return fract(sin(dot(st.xy, vec2(12.9898,78.233)))*43758.5453123);
+}
+
+vec2 random2( vec2 p ) {
+  return fract(sin(vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))))*43758.5453);
+}
+
+// float clamp(float a) {
+//   return max(min(a, 0.0), 0.0);
+// }
+
+vec3 equirect(sampler2D tex, vec3 n) {
+  vec3 v = n;
+  vec2 uv = vec2(atan(v.z, v.x), asin(v.y));
+  uv *= vec2(0.1591, 0.3183);
+  uv += 0.5;
+  uv.y *= -1.0;
+  return texture(tex, uv).rgb;
+}
+
+// vec3 normals(in vec2 uv) {
+//     // uv = fract(uv)*2.0-1.0;
+//     vec3 ret;
+//     ret.xy = sqrt(uv * uv) * sign(uv);
+//     ret.z = sqrt(abs(1.0 - dot(ret.xy,ret.xy)));
+//     ret = ret * 0.5 + 0.5;
+//     return mix(vec3(0.0), ret, smoothstep(1.0,0.98,dot(uv,uv)) );
+// }
+
+vec3 normals(vec2 uv) {
+  return vec3(
+    uv.x,
+    uv.y,
+    sqrt(1.0 - (uv.x*uv.x + uv.y*uv.y))
+  );
+}
+
+vec3 rotate(vec3 a, float r) {
+  return a * mat3(
+    cos(r),  0, sin(r), 
+    0,       1, 0,      
+    -sin(r), 0, cos(r)
+  );
+}
+
+void main() {
+  vec3 light = normalize(vec3(1.0, 1.0, 1.0));
+  vec3 normal = rotate(normals(uv*2.0), t*0.5);
+  vec3 planetTexture = max(vec3(0.4, 0.2, 0.9) * (fbm(normal*2.0)*0.7 + fbm(normal*10.0)*0.3), 0.0);
+
+  // float lon = uv.x * 2.0 * 3.14159265359;
+  // float lat = (uv.y*2.0-1.0) * 2.0 * 3.14159265359;
+  // vec3 planetTexture = texture(tex, vec2(lon, lat)/* vec3(cos(lon)*cos(lat), sin(lon)*cos(lat), sin(lat)) */).xyz;
+  vec3 v = normalize(vec3(uvsq, -1.0));
+  vec2 _uv = vec2(atan(v.z, v.x), asin(v.y));
+  _uv *= vec2(0.1591, 0.3183);
+  _uv += 0.5;
+  _uv.y *= -1.0;
+  // vec3 planetTexture = texture(tex, _uv).rgb;
+
+  float planetMask = clamp(smoothstep(0.0, 0.02, -length(uv)+0.5), 0.0, 1.0);
+  vec3 planet = max(dot(normal, light), 0.1) * planetTexture;
+
+    vec2 screen = vec2(2.0*(16.0/9.0), 2.0);
+    vec2 xy = ((uv+0.5)*screen) - screen/2.0;
+    float z = screen.y / tan(radians(70.0)/2.0);
+    vec3 ray_dir = /* camera.mat *  */normalize(vec3(xy, -z));
+  vec3 n = rotate(ray_dir, t*0.5)*1.0;
+  // vec3 stars = vec3(smoothstep(0.999, 1.0, fbm(n*50.0) - 0.5)); //texture(tex, fract((uvsq+0.5) * vec2(0.5, 1.0) + vec2(-t*0.1, 0.0))).rgb;
+  vec3 stars = vec3(smoothstep(1.0, 1.5, fbm(n*2.0))*0.5 * (fbm(n*5.0)*vec3(0.8, 0.2, 0.2)*0.5+fbm(n*10.0)*vec3(0.2, 0.8, 0.2)*0.5));
+
+  // vec3 stars = vec3(smoothstep(0.995, 1.0, random(uv)));
+  vec3 color = /* max(planet, 0.0) * max(planetMask, 0.0) + 0.5 */ /* + vec3(stars)*(1.0-planetMask) */ mix(stars, planet, planetMask);
+  // color = vec3(1.0-planetMask);
+  // color = planetTexture;
+  frag = vec4(color, 1);
+}
+  `)
+  const starShader = create_shader(`#version 300 es
+    
+uniform sampler2D tex;
+uniform float aspect;
+layout(location = 0) in vec3 pos;
+out vec2 uv;
+out vec2 uvsq;
+
+void main() {
+  vec4 p = vec4(pos*2.0, 1.0);
+  gl_Position = p;
+  uv = p.xy * vec2(aspect, 1.0);
+  uvsq  = pos.xy;
+}
+  `,`#version 300 es
+    
+precision mediump float;
+uniform sampler2D tex;
+uniform float t;
+in vec2 uv;
+out vec4 frag;
+
+
+
+
+
+float hash(float n) {
+  return fract(sin(n)*753.5453123);
+}
+
+float noise(vec3 x) {
+    vec3 p = floor(x);
+    vec3 f = fract(x);
+    f = f*f*(3.0-2.0*f);
+
+    float n = p.x + p.y*157.0 + 113.0*p.z;
+    return mix(mix(mix(hash(n+0.0), hash(n+1.0), f.x), mix(hash(n+157.0), hash(n+158.0), f.x), f.y),
+               mix(mix(hash(n+113.0), hash(n+114.0), f.x), mix(hash(n+270.0), hash(n+271.0), f.x), f.y), f.z);
+}
+
+float fbm(vec3 x) {
+    float a = noise(x);
+    a += noise(x * 2.0) / 2.0;
+    a += noise(x * 4.0) / 4.0;
+    a += noise(x * 8.0) / 8.0;
+    a += noise(x * 16.0) / 16.0;
+    return a;
+}
+
+float random (vec2 st) {
+  return fract(sin(dot(st.xy, vec2(12.9898,78.233)))*43758.5453123);
+}
+
+vec2 random2( vec2 p ) {
+  return fract(sin(vec2(dot(p,vec2(127.1,311.7)),dot(p,vec2(269.5,183.3))))*43758.5453);
+}
+
+// float clamp(float a) {
+//   return max(min(a, 0.0), 0.0);
+// }
+
+vec3 equirect(sampler2D tex, vec3 n) {
+  vec3 v = n;
+  vec2 uv = vec2(atan(v.z, v.x), asin(v.y));
+  uv *= vec2(0.1591, 0.3183);
+  uv += 0.5;
+  uv.y *= -1.0;
+  return texture(tex, uv).rgb;
+}
+
+// vec3 normals(in vec2 uv) {
+//     // uv = fract(uv)*2.0-1.0;
+//     vec3 ret;
+//     ret.xy = sqrt(uv * uv) * sign(uv);
+//     ret.z = sqrt(abs(1.0 - dot(ret.xy,ret.xy)));
+//     ret = ret * 0.5 + 0.5;
+//     return mix(vec3(0.0), ret, smoothstep(1.0,0.98,dot(uv,uv)) );
+// }
+
+vec3 normals(vec2 uv) {
+  return vec3(
+    uv.x,
+    uv.y,
+    sqrt(1.0 - (uv.x*uv.x + uv.y*uv.y))
+  );
+}
+
+vec3 rotate(vec3 a, float r) {
+  return a * mat3(
+    cos(r),  0, sin(r), 
+    0,       1, 0,      
+    -sin(r), 0, cos(r)
+  );
+}
+
+void main() {
+  // vec3 light = normalize(vec3(1.0, 1.0, 1.0));
+  // vec3 normal = rotate(normals(uv*2.0), t*0.5);
+  // vec3 texture = max(vec3(0.4, 0.2, 0.9) * (fbm(normal*2.0)*0.7 + fbm(normal*10.0)*0.3), 0.0);
+  // float planetMask = clamp(smoothstep(0.0, 0.02, -length(uv)+0.5), 0.0, 1.0);
+  // vec3 planet = max(dot(normal, light), 0.1) * texture;
+  float stars = smoothstep(0.995, 1.0, random(uv))/* fbm(vec3(uv*1.0, 1.0)) */;
+  // vec3 color = /* max(planet, 0.0) * max(planetMask, 0.0) + 0.5 */ /* + vec3(stars)*(1.0-planetMask) */ mix(vec3(stars), planet, planetMask);
+  // color = vec3(1.0-planetMask);
+  // color = texture;
+  frag = vec4(vec3(stars), 1);
+}
+  `)
+
+  const stars = createFramebuffer(screenWidth, screenHeight)
+
+  let time = 0.0
+  function draw(t) {
+    if (t) time += t
+
+    bindRenderTarget(stars)
+    use_shader(starShader)
+    clear(0, 0, 0, 1)
+    uniform('t', t/1000.0)
+    uniform('aspect', screenWidth/screenHeight)
+    renderQuad()
+
+    bindRenderTarget(null)
+    use_shader(shader)
+    clear(0, 0, 0, 1)
+    uniform('t', t/1000.0)
+    uniform('aspect', screenWidth/screenHeight)
+    uniformRenderTarget('tex', stars)
+    renderQuad()
+    
+    window.requestAnimationFrame(draw)
+  }
+  draw()
+
+</script>

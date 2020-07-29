@@ -1,0 +1,28 @@
+<script>
+  #include "../math.js"
+</script>
+<script>
+
+  gl_init()
+
+  const cellShader = create_shader(`#version 300 es
+    #include "cells.vert"
+  `,`#version 300 es
+    #include "cells.frag"
+  `)
+
+  let time = 0.0
+  function draw(t) {
+    if (t) time += t
+
+    bindRenderTarget(null)
+    use_shader(cellShader)
+    clear(0, 0, 0, 1)
+    uniform('t', t/1000.0)
+    renderQuad()
+    
+    window.requestAnimationFrame(draw)
+  }
+  draw()
+
+</script>
